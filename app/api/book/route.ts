@@ -5,6 +5,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     console.log("Received body:", JSON.stringify(body));
+    console.log("FULL BODY:", JSON.stringify(body, null, 2));
 
     // Handle multiple possible formats from Vapi
     const name = body.name || body.attendee?.name;
