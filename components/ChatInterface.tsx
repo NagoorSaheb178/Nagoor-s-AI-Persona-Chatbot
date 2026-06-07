@@ -3,12 +3,6 @@
 import { useState, useRef, useEffect, FormEvent } from "react";
 import { BOOKING_TOOLS } from "@/lib/prompts";
 
-declare global {
-  interface Window {
-    puter: any;
-  }
-}
-
 interface Message {
   role: "user" | "assistant" | "system" | "tool";
   content: string | null;
@@ -129,7 +123,7 @@ export default function ChatInterface() {
   }, [messages, isLoading]);
 
   const runChatLoop = async (currentMessages: Message[]) => {
-    if (!window.puter) {
+    if (!(window as any).puter) {
       throw new Error("Puter.js SDK is not loaded.");
     }
 
@@ -137,7 +131,7 @@ export default function ChatInterface() {
 
     while (true) {
       // Create chat completion request via Puter SDK
-      const response = await window.puter.ai.chat(conversationMessages, {
+      const response = await (window as any).puter.ai.chat(conversationMessages, {
         model: "gpt-4o-mini", // Use GPT-4o-mini via Puter API
         tools: BOOKING_TOOLS,
         stream: false, // Turn off stream to support tool calls properly
