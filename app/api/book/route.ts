@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { bookMeeting } from "@/lib/booking";
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -8,15 +19,19 @@ export async function POST(req: NextRequest) {
 
     let name, email, start;
 
-    // Vapi format — data inside message.toolCalls
-    if (body?.message?.toolCalls?.[0]?.function?.arguments) {
-      const args = body.message.toolCalls[0].function.arguments;
-      name = args.name;
-      email = args.email;
-      start = args.start;
+    // Vapi wraps data in body.message.toolCalls
+    const toolCalls = body?.message?.toolCalls;
+    if (toolCalls && toolCalls.length > 0) {
+      const args = toolCalls[0]?.function?.arguments;
+      if (args) {
+        name = args.name;
+        email = args.email;
+        start = args.start;
+      }
     }
-    // Direct format
-    else if (body?.name) {
+
+    // Fallback — direct body
+    if (!name) {
       name = body.name;
       email = body.email;
       start = body.start || body.startTime;
@@ -26,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     if (!name || !email || !start) {
       return NextResponse.json(
-        { error: `Missing required fields: name=${name}, email=${email}, start=${start}` },
+        { error: `Missing: name=${name}, email=${email}, start=${start}` },
         { status: 400 }
       );
     }
