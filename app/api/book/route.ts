@@ -3,11 +3,19 @@ import { bookMeeting } from "@/lib/booking";
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, start } = await req.json();
+    const body = await req.json();
+    console.log("Received body:", JSON.stringify(body));
+
+    // Handle multiple possible formats from Vapi
+    const name = body.name || body.attendee?.name;
+    const email = body.email || body.attendee?.email;
+    const start = body.start || body.startTime || body.start_time;
+
+    console.log("Parsed:", { name, email, start });
 
     if (!name || !email || !start) {
       return NextResponse.json(
-        { error: "Missing required fields: name, email, start" },
+        { error: `Missing required fields: name=${name}, email=${email}, start=${start}` },
         { status: 400 }
       );
     }
