@@ -4,13 +4,23 @@ import { bookMeeting } from "@/lib/booking";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    console.log("Received body:", JSON.stringify(body));
     console.log("FULL BODY:", JSON.stringify(body, null, 2));
 
-    // Handle multiple possible formats from Vapi
-    const name = body.name || body.attendee?.name;
-    const email = body.email || body.attendee?.email;
-    const start = body.start || body.startTime || body.start_time;
+    let name, email, start;
+
+    // Vapi format — data inside message.toolCalls
+    if (body?.message?.toolCalls?.[0]?.function?.arguments) {
+      const args = body.message.toolCalls[0].function.arguments;
+      name = args.name;
+      email = args.email;
+      start = args.start;
+    }
+    // Direct format
+    else if (body?.name) {
+      name = body.name;
+      email = body.email;
+      start = body.start || body.startTime;
+    }
 
     console.log("Parsed:", { name, email, start });
 
@@ -26,7 +36,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       booking,
-      message: `Meeting booked successfully! Confirmation sent to ${email}`,
+      message: `Meeting booked! Confirmation sent to ${email}`,
     });
   } catch (error: unknown) {
     console.error("Book API error:", error);
