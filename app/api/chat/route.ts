@@ -1,7 +1,7 @@
 import puter from "@heyputer/puter.js";
 import { loadKnowledgeBase } from "@/lib/rag";
 import { buildSystemPrompt, BOOKING_TOOLS } from "@/lib/prompts";
-import { checkAvailability, bookMeeting } from "@/lib/booking";
+import { checkAvailability, bookMeeting, getAvailableSlots } from "@/lib/booking";
 
 // If you have a Puter auth token from your environment, you can set it like this:
 // if (process.env.PUTER_AUTH_TOKEN) {
@@ -47,6 +47,23 @@ export async function POST(req: Request) {
           toolResult = await bookMeeting(args.name, args.email, args.start);
         } catch (error) {
           toolResult = { success: false, message: "Booking failed, please try again" };
+        }
+      }
+
+      if (toolCall.function.name === "getAvailableSlots") {
+        try {
+          const availableSlots = await getAvailableSlots();
+          if (availableSlots.length === 0) {
+            toolResult = { message: "No available slots found in the next 7 days." };
+          } else {
+            toolResult = {
+              available: true,
+              slots: availableSlots,
+              message: "Here are the available slots"
+            };
+          }
+        } catch (error) {
+          toolResult = { success: false, message: "Failed to fetch available slots" };
         }
       }
 
