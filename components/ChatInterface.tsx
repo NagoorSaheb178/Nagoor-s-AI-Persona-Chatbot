@@ -566,6 +566,9 @@ function speakText(
     } catch { }
     speakChunk(0);
   }
+function getInitialSystemPrompt(): string {
+  const dynamicDays = getDynamicWeekdaySlots();
+  return buildSystemPrompt("", dynamicDays);
 }
 
 /* ── Main Voice-Only Interface ────────────────────────────────────── */
