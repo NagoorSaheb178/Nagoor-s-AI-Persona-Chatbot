@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { BOOKING_TOOLS } from "@/lib/prompts";
+import { BOOKING_TOOLS, buildSystemPrompt, getDynamicWeekdaySlots } from "@/lib/prompts";
 import {
   Mic,
   MicOff,
@@ -41,50 +41,17 @@ interface BookingSlot {
 }
 
 function getDynamicUpcomingSlots(): BookingSlot[] {
+  const dynamicDays = getDynamicWeekdaySlots();
   const slots: BookingSlot[] = [];
-  const now = new Date();
-  let checkDate = new Date(now.getTime() + 24 * 60 * 60 * 1000); // Start from tomorrow
-  let daysCount = 0;
-
-  // Generate slots for 7 distinct upcoming working days (Monday - Friday)
-  while (daysCount < 7) {
-    const dayOfWeek = checkDate.getDay();
-    // Weekdays only (Monday=1 to Friday=5)
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      daysCount++;
-      const dateFormatted = checkDate.toLocaleDateString("en-US", {
-        timeZone: "Asia/Kolkata",
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-        year: "numeric",
+  for (const day of dynamicDays) {
+    for (const item of day.slotDetails) {
+      slots.push({
+        date: day.date,
+        time: item.time,
+        iso: item.iso,
       });
-
-      const year = checkDate.getFullYear();
-      const month = String(checkDate.getMonth() + 1).padStart(2, "0");
-      const day = String(checkDate.getDate()).padStart(2, "0");
-      const ymd = `${year}-${month}-${day}`;
-
-      const times = [
-        { label: "09:00 AM IST", isoSuffix: "T03:30:00.000Z" },
-        { label: "09:30 AM IST", isoSuffix: "T04:00:00.000Z" },
-        { label: "10:30 AM IST", isoSuffix: "T05:00:00.000Z" },
-        { label: "11:00 AM IST", isoSuffix: "T05:30:00.000Z" },
-        { label: "12:30 PM IST", isoSuffix: "T07:00:00.000Z" },
-        { label: "01:00 PM IST", isoSuffix: "T07:30:00.000Z" },
-      ];
-
-      for (const t of times) {
-        slots.push({
-          date: dateFormatted,
-          time: t.label,
-          iso: `${ymd}${t.isoSuffix}`,
-        });
-      }
     }
-    checkDate.setDate(checkDate.getDate() + 1);
   }
-
   return slots;
 }
 
@@ -603,7 +570,7 @@ function speakText(
 
 /* ── Main Voice-Only Interface ────────────────────────────────────── */
 export default function ChatInterface() {
-  const [systemPrompt, setSystemPrompt] = useState<string>(FALLBACK_SYSTEM_PROMPT);
+  const [systemPrompt, setSystemPrompt] = useState<string>(() => getInitialSystemPrompt());
 
   /* ── Tab Switcher: Independent Voice AI vs Text Chat ────────────── */
   const [activeTab, setActiveTab] = useState<"voice" | "chat">("voice");
@@ -1089,6 +1056,7 @@ export default function ChatInterface() {
 
     recognition.onstart = () => {
       if (voiceRecognitionRef.current !== recognition) return;
+
       voiceIsListeningRef.current = true;
       setVoiceIsListening(true);
       setVoiceStatusText("Listening to you... Speak now");
@@ -1220,7 +1188,7 @@ export default function ChatInterface() {
             setVoiceSessionActive(false);
             try {
               voiceRecognitionRef.current?.abort();
-            } catch {}
+            } catch { }
             setVoiceIsListening(false);
             voiceIsListeningRef.current = false;
             setVoiceIsLoading(false);
@@ -1571,8 +1539,8 @@ export default function ChatInterface() {
                 id="tab-voice-button"
                 onClick={() => setActiveTab("voice")}
                 className={`flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${activeTab === "voice"
-                    ? "bg-zinc-800 text-white shadow-sm border border-zinc-700/70"
-                    : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-zinc-800 text-white shadow-sm border border-zinc-700/70"
+                  : "text-zinc-400 hover:text-zinc-200"
                   }`}
               >
                 <Mic className="w-3.5 h-3.5" />
@@ -1589,8 +1557,8 @@ export default function ChatInterface() {
                   setActiveTab("chat");
                 }}
                 className={`flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${activeTab === "chat"
-                    ? "bg-zinc-800 text-white shadow-sm border border-zinc-700/70"
-                    : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-zinc-800 text-white shadow-sm border border-zinc-700/70"
+                  : "text-zinc-400 hover:text-zinc-200"
                   }`}
               >
                 <MessageSquare className="w-3.5 h-3.5" />
@@ -1656,14 +1624,14 @@ export default function ChatInterface() {
               tabIndex={0}
               aria-label="Toggle voice session"
               className={`w-36 h-36 sm:w-44 sm:h-44 md:w-48 md:h-48 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 select-none ${voiceIsListening
-                  ? "bg-rose-500/10 border-2 border-rose-500/50 voice-listening-ring"
-                  : voiceIsSpeaking
-                    ? "bg-emerald-500/10 border-2 border-emerald-500/50 voice-speaking-ring"
-                    : voiceIsLoading
-                      ? "bg-zinc-900 border-2 border-amber-500/40"
-                      : voiceSessionActive
-                        ? "bg-zinc-900 border-2 border-blue-500/40"
-                        : "bg-zinc-900 border border-zinc-700/80 hover:border-zinc-500 hover:bg-zinc-850"
+                ? "bg-rose-500/10 border-2 border-rose-500/50 voice-listening-ring"
+                : voiceIsSpeaking
+                  ? "bg-emerald-500/10 border-2 border-emerald-500/50 voice-speaking-ring"
+                  : voiceIsLoading
+                    ? "bg-zinc-900 border-2 border-amber-500/40"
+                    : voiceSessionActive
+                      ? "bg-zinc-900 border-2 border-blue-500/40"
+                      : "bg-zinc-900 border border-zinc-700/80 hover:border-zinc-500 hover:bg-zinc-850"
                 }`}
             >
               <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-zinc-950 flex flex-col items-center justify-center p-3 sm:p-4 border border-zinc-800 shadow-inner">
@@ -1720,8 +1688,8 @@ export default function ChatInterface() {
               type="button"
               onClick={handleToggleVoiceSession}
               className={`w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl font-semibold text-sm shadow-md transition-all cursor-pointer active:scale-98 ${voiceSessionActive
-                  ? "bg-rose-600 hover:bg-rose-500 text-white"
-                  : "bg-zinc-100 hover:bg-white text-zinc-900"
+                ? "bg-rose-600 hover:bg-rose-500 text-white"
+                : "bg-zinc-100 hover:bg-white text-zinc-900"
                 }`}
             >
               {voiceSessionActive ? (
@@ -1776,8 +1744,8 @@ export default function ChatInterface() {
 
                   <div
                     className={`max-w-[88%] sm:max-w-[78%] rounded-2xl p-3.5 sm:p-4 text-xs sm:text-sm leading-relaxed ${isUser
-                        ? "bg-blue-600 text-white rounded-tr-sm shadow-sm font-medium"
-                        : "bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-tl-sm shadow-sm"
+                      ? "bg-blue-600 text-white rounded-tr-sm shadow-sm font-medium"
+                      : "bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-tl-sm shadow-sm"
                       }`}
                   >
                     <p className="whitespace-pre-wrap">{cleanContent}</p>
@@ -1878,8 +1846,8 @@ export default function ChatInterface() {
                 id="chat-send-button"
                 disabled={!chatInput.trim() || chatIsLoading}
                 className={`p-2.5 sm:p-3 rounded-xl font-medium transition cursor-pointer active:scale-95 flex-shrink-0 ${chatInput.trim() && !chatIsLoading
-                    ? "bg-zinc-100 hover:bg-white text-zinc-900 shadow-sm"
-                    : "bg-zinc-850 text-zinc-600 cursor-not-allowed border border-zinc-800"
+                  ? "bg-zinc-100 hover:bg-white text-zinc-900 shadow-sm"
+                  : "bg-zinc-850 text-zinc-600 cursor-not-allowed border border-zinc-800"
                   }`}
               >
                 <Send className="w-4 h-4" />
@@ -1995,8 +1963,8 @@ export default function ChatInterface() {
                           selectedSlotRef.current = slot;
                         }}
                         className={`py-2 px-1 text-xs rounded-lg font-medium transition text-center border cursor-pointer active:scale-95 ${isSelected
-                            ? "bg-zinc-100 border-zinc-100 text-zinc-900 font-semibold shadow-sm"
-                            : "bg-zinc-800/80 border-zinc-700/70 text-zinc-300 hover:border-zinc-500 hover:text-white"
+                          ? "bg-zinc-100 border-zinc-100 text-zinc-900 font-semibold shadow-sm"
+                          : "bg-zinc-800/80 border-zinc-700/70 text-zinc-300 hover:border-zinc-500 hover:text-white"
                           }`}
                       >
                         {slot.time.replace(" IST", "")}
@@ -2052,8 +2020,8 @@ export default function ChatInterface() {
                 id="booking-form-continue"
                 disabled={!isFormValid}
                 className={`mt-2 w-full py-3 sm:py-3.5 rounded-xl font-medium text-sm transition cursor-pointer flex items-center justify-center gap-2 ${isFormValid
-                    ? "bg-zinc-100 hover:bg-white text-zinc-900 font-semibold shadow-sm active:scale-98"
-                    : "bg-zinc-800 text-zinc-600 cursor-not-allowed border border-zinc-700/50"
+                  ? "bg-zinc-100 hover:bg-white text-zinc-900 font-semibold shadow-sm active:scale-98"
+                  : "bg-zinc-800 text-zinc-600 cursor-not-allowed border border-zinc-700/50"
                   }`}
               >
                 <span>{contactName.trim() ? "Update & Continue" : "Continue"}</span>
