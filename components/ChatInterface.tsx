@@ -320,8 +320,10 @@ function cleanMarkdownFormatting(text: string): string {
 let speechKeepAliveInterval: any = null;
 let speechSafetyTimeout: any = null;
 let activeWordTimer: any = null;
+let currentSpeechId = 0;
 
 function stopSpeaking() {
+  currentSpeechId++;
   if (speechKeepAliveInterval) {
     clearInterval(speechKeepAliveInterval);
     speechKeepAliveInterval = null;
@@ -335,7 +337,28 @@ function stopSpeaking() {
     activeWordTimer = null;
   }
   if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
+    try {
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        window.speechSynthesis.cancel();
+      }
+    } catch { }
+  }
+}
+
+function getBestVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === "undefined" || !window.speechSynthesis) return null;
+  try {
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) return null;
+    return (
+      voices.find(v => v.lang.startsWith("en") && (v.name.includes("Google") || v.name.includes("Natural") || v.name.includes("Samantha") || v.name.includes("Jenny") || v.name.includes("Guy") || v.name.includes("Rishi") || v.name.includes("Heera") || v.name.includes("Veena"))) ||
+      voices.find(v => v.lang.startsWith("en") && !v.localService) ||
+      voices.find(v => v.lang.startsWith("en")) ||
+      voices[0] ||
+      null
+    );
+  } catch {
+    return null;
   }
 }
 
@@ -374,7 +397,9 @@ function speakText(
     return;
   }
 
+  const hadOngoingSpeech = window.speechSynthesis.speaking || window.speechSynthesis.pending;
   stopSpeaking();
+  const speechId = currentSpeechId;
 
   // Strip brackets, markdown symbols, and URLs to keep speech natural
   const cleanText = text
@@ -440,26 +465,23 @@ function speakText(
   };
 
   const finishSpeech = () => {
-    if (isDone) return;
+    if (isDone || speechId !== currentSpeechId) return;
     isDone = true;
     cleanup();
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch { }
-    }
     onWordIndex?.(totalWords, totalWords);
     onEnd?.();
   };
 
   // Safety watchdog timer: guarantees speech ends and voice returns to continuous listening
-  const estimatedTotalMs = Math.max(totalWords * 420 + 4000, 6000);
+  const estimatedTotalMs = Math.max(totalWords * 450 + 5000, 7000);
   speechSafetyTimeout = setTimeout(() => {
-    finishSpeech();
+    if (speechId === currentSpeechId) {
+      finishSpeech();
+    }
   }, estimatedTotalMs);
 
   const speakChunk = (idx: number) => {
-    if (isDone || idx >= sentenceChunks.length) {
+    if (isDone || speechId !== currentSpeechId || idx >= sentenceChunks.length) {
       finishSpeech();
       return;
     }
@@ -470,9 +492,16 @@ function speakText(
     const baseWordOffset = wordsSpokenSoFar;
 
     const utterance = new SpeechSynthesisUtterance(chunkText);
-    utterance.rate = 1.05;
+    utterance.rate = 1.0;
     utterance.pitch = 1.0;
-    utterance.lang = "en-US";
+
+    const chosenVoice = getBestVoice();
+    if (chosenVoice) {
+      utterance.voice = chosenVoice;
+      utterance.lang = chosenVoice.lang;
+    } else {
+      utterance.lang = "en-US";
+    }
 
     let lastReportedLocal = 0;
 
@@ -488,6 +517,7 @@ function speakText(
     };
 
     utterance.onstart = () => {
+      if (speechId !== currentSpeechId) return;
       if (!hasStarted) {
         hasStarted = true;
         onStart?.();
@@ -507,6 +537,7 @@ function speakText(
     };
 
     utterance.onend = () => {
+      if (speechId !== currentSpeechId) return;
       if (activeWordTimer) {
         clearInterval(activeWordTimer);
         activeWordTimer = null;
@@ -522,8 +553,12 @@ function speakText(
       }
     };
 
-    utterance.onerror = (e) => {
-      console.warn("[speakText] Chunk utterance error:", e);
+    utterance.onerror = (e: any) => {
+      if (speechId !== currentSpeechId) return;
+      if (e?.error === "interrupted" || e?.error === "canceled") {
+        return;
+      }
+      console.warn("[speakText] Chunk utterance error:", e?.error || e);
       if (activeWordTimer) {
         clearInterval(activeWordTimer);
         activeWordTimer = null;
@@ -537,11 +572,33 @@ function speakText(
       }
     };
 
-    window.speechSynthesis.speak(utterance);
+    try {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      console.warn("[speakText] speak failed:", err);
+      finishSpeech();
+    }
   };
 
-  // Begin first sentence chunk
-  speakChunk(0);
+  // If there was ongoing speech that was cancelled, give Chrome 60ms to flush the cancel IPC
+  if (hadOngoingSpeech) {
+    setTimeout(() => {
+      if (speechId === currentSpeechId) {
+        try {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        } catch { }
+        speakChunk(0);
+      }
+    }, 60);
+  } else {
+    try {
+      if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+    } catch { }
+    speakChunk(0);
+  }
 }
 
 /* ── Main Voice-Only Interface ────────────────────────────────────── */
@@ -618,6 +675,25 @@ export default function ChatInterface() {
   const selectedSlotRef = useRef<BookingSlot>(getDynamicUpcomingSlots()[0]);
   const isBookingInProgressRef = useRef(false);
   const hasBookedSuccessfullyRef = useRef(false);
+  const restartListeningTimeoutRef = useRef<any>(null);
+
+  const cleanupRecognition = useCallback(() => {
+    if (restartListeningTimeoutRef.current) {
+      clearTimeout(restartListeningTimeoutRef.current);
+      restartListeningTimeoutRef.current = null;
+    }
+    if (voiceRecognitionRef.current) {
+      const old = voiceRecognitionRef.current;
+      old.onstart = null;
+      old.onresult = null;
+      old.onerror = null;
+      old.onend = null;
+      try {
+        old.abort();
+      } catch { }
+      voiceRecognitionRef.current = null;
+    }
+  }, []);
 
   voiceSessionActiveRef.current = voiceSessionActive;
   voiceIsSpeakingRef.current = voiceIsSpeaking;
@@ -629,6 +705,13 @@ export default function ChatInterface() {
   contactNameRef.current = contactName;
   contactEmailRef.current = contactEmail;
   selectedSlotRef.current = selectedSlot;
+
+  // Initialize Puter.js in quiet mode to suppress console noise
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).puter) {
+      (window as any).puter.quiet = true;
+    }
+  }, []);
 
   // Pre-fetch enhanced system prompt and live Cal.com slots
   useEffect(() => {
@@ -982,14 +1065,13 @@ export default function ChatInterface() {
       return;
     }
 
-    try {
-      voiceRecognitionRef.current?.abort();
-    } catch { }
+    cleanupRecognition();
 
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
-    recognition.lang = "en-IN"; // Indian English for accurate speech recognition
+    const navLang = (typeof navigator !== "undefined" && navigator.language) || "en-IN";
+    recognition.lang = navLang.startsWith("en") ? navLang : "en-IN";
     voiceRecognitionRef.current = recognition;
 
     let localFinalTranscript = "";
@@ -1006,6 +1088,7 @@ export default function ChatInterface() {
     };
 
     recognition.onstart = () => {
+      if (voiceRecognitionRef.current !== recognition) return;
       voiceIsListeningRef.current = true;
       setVoiceIsListening(true);
       setVoiceStatusText("Listening to you... Speak now");
@@ -1014,6 +1097,7 @@ export default function ChatInterface() {
     };
 
     recognition.onresult = (event: any) => {
+      if (voiceRecognitionRef.current !== recognition) return;
       let interim = "";
       let hasFinal = false;
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -1040,6 +1124,7 @@ export default function ChatInterface() {
     };
 
     recognition.onerror = (e: any) => {
+      if (voiceRecognitionRef.current !== recognition) return;
       if (speechSilenceTimer) {
         clearTimeout(speechSilenceTimer);
         speechSilenceTimer = null;
@@ -1058,6 +1143,7 @@ export default function ChatInterface() {
     };
 
     recognition.onend = async () => {
+      if (voiceRecognitionRef.current !== recognition) return;
       if (speechSilenceTimer) {
         clearTimeout(speechSilenceTimer);
         speechSilenceTimer = null;
@@ -1290,13 +1376,13 @@ export default function ChatInterface() {
           }
         }
       } else {
-        // No speech detected: restart listening if session remains active and AI is not speaking/loading
+        // No speech detected: restart listening cleanly if session remains active and AI is not speaking/loading
         if (voiceSessionActiveRef.current && !voiceIsSpeakingRef.current && !voiceIsLoadingRef.current) {
-          setTimeout(() => {
+          restartListeningTimeoutRef.current = setTimeout(() => {
             if (voiceSessionActiveRef.current && !voiceIsSpeakingRef.current && !voiceIsLoadingRef.current) {
               startContinuousListening();
             }
-          }, 150);
+          }, 250);
         }
       }
     };
@@ -1315,7 +1401,7 @@ export default function ChatInterface() {
         console.warn("Could not start recognition:", err);
       }
     }
-  }, [systemPrompt]);
+  }, [systemPrompt, cleanupRecognition]);
 
   // Heartbeat watchdog: Guarantees voice listening NEVER silently dies or freezes during an active session
   useEffect(() => {
@@ -1328,7 +1414,7 @@ export default function ChatInterface() {
       ) {
         startContinuousListening();
       }
-    }, 1200);
+    }, 1500);
 
     return () => clearInterval(watchdog);
   }, [startContinuousListening]);
@@ -1375,9 +1461,7 @@ export default function ChatInterface() {
     if (voiceSessionActive) {
       voiceSessionActiveRef.current = false;
       setVoiceSessionActive(false);
-      try {
-        voiceRecognitionRef.current?.abort();
-      } catch { }
+      cleanupRecognition();
       stopSpeaking();
       setVoiceIsSpeaking(false);
       setVoiceIsListening(false);
@@ -1387,6 +1471,27 @@ export default function ChatInterface() {
       updateVoiceSubtitle("");
       setVoiceStatusText("Session ended. Tap to start again.");
     } else {
+      // 1. Preload voices & resume audio context
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.getVoices();
+        try {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        } catch { }
+      }
+
+      // 2. Request mic permission explicitly via getUserMedia to unlock audio input immediately
+      if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+        navigator.mediaDevices
+          .getUserMedia({ audio: true })
+          .then((stream) => {
+            stream.getTracks().forEach((track) => track.stop());
+          })
+          .catch((err) => {
+            console.warn("Microphone access check:", err);
+          });
+      }
+
+      cleanupRecognition();
       voiceSessionActiveRef.current = true;
       setVoiceSessionActive(true);
 

@@ -34,6 +34,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.puter = window.puter || {}; window.puter.quiet = true;`,
+          }}
+        />
         <script src="https://js.puter.com/v2/"></script>
       </head>
       <body className={`${inter.className} antialiased bg-gray-950`}>{children}</body>
